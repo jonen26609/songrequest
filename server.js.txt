@@ -1,0 +1,70 @@
+const express = require('express');
+const bodyParser = require('body-parser');
+const fetch = require('node-fetch');
+
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+app.use(bodyParser.json());
+
+app.post('/request-song', async (req, res) => {
+    const { artist, title, message } = req.body;
+
+    const rb_server = '127.0.0.1'; //RadioBOSS hostname or IP
+    const rb_port = '9000'; //RadioBOSS port
+    const rb_password = '3y6EUBGcWL'; //API password
+    const rb_library = 'music';
+
+    const rb_api = `http://${rb_server}:${rb_port}?pass=${rb_password}`;
+
+    // Function to perform HTTP GET request
+    async function HTTPGet(url) {
+        try {
+            const response = await fetch(url);
+            if (!response.ok) {
+                throw new Error('Network response was not ok');
+            }
+            return await response.text();
+        } catch (error) {
+            console.error('Fetch error:', error);
+            throw error;
+        }
+    }
+
+    try {
+        // Load library
+        const library_raw = await HTTPGet(`${rb_api}&action=library&filename=${encodeURIComponent(rb_library)}`);
+        const parser = new DOMParser();
+        const xmlDoc = parser.parseFromString(library_raw, "text/xml");
+
+        let fn = false;
+        const tracks = xmlDoc.getElementsByTagName('Track');
+        for (let i = 0; i < tracks.length; i++) {
+            const track = tracks[i];
+            const trackArtist = track.getAttribute('artist').toLowerCase();
+            const trackTitle = track.getAttribute('title').toLowerCase();
+            if ((artist && trackArtist === artist.toLowerCase()) || (title && trackTitle === title.toLowerCase())) {
+                fn = track.getAttribute('filename');
+                break;
+            }
+        }
+
+        // Song found, add to requested songs list in RadioBOSS
+        if (fn) {
+            const requestResult = await HTTPGet(`${rb_api}&action=songrequest&filename=${encodeURIComponent(fn)}&message=${encodeURIComponent(message)}`);
+            if (requestResult === 'OK') {
+                res.json({ message: 'Song requested successfully!' });
+            } else {
+                res.json({ message: 'An error occurred while adding song request.' });
+            }
+        } else {
+            res.json({ message: 'Requested song not found in the music library.' });
+        }
+    } catch (error) {
+        res.status(500).json({ message: 'Failed to process song request.' });
+    }
+});
+
+app.listen(PORT, () => {
+    console.log(`Server is running on port ${PORT}`);
+});
